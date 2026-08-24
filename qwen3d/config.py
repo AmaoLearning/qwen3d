@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 # Copyright (c) Facebook, Inc. and its affiliates.
+import os
+from pathlib import Path
+
 from detectron2.config import CfgNode as CN
 
 
@@ -170,7 +173,7 @@ def add_maskformer2_video_config(cfg):
     cfg.USE_GHOST_POINTS = (
         True  # featurizes the ghost points and do dot product with them
     )
-    cfg.SCANNET_DATA_DIR = "/path/to/mask3d_processed/scannet/train_validation_database.yaml"
+    cfg.SCANNET_DATA_DIR = "/mnt/shared-storage-user/yicheng-data/Qwen-3D/data/mask3d_processed/scannet/train_validation_database.yaml"
     cfg.S3DIS_DATA_DIR = "/path/to/SEMSEG_100k/s3dis/train_validation_database.yaml"
     cfg.SCANNETPP_DATA_DIR = None
     cfg.INPUT.RENDER_COLOR = False
@@ -235,7 +238,7 @@ def add_maskformer2_video_config(cfg):
     cfg.INPUT.MAX_SIZE_TEST_2D = cfg.INPUT.MAX_SIZE_TEST
     cfg.INPUT.IMAGE_SIZE_2D = cfg.INPUT.IMAGE_SIZE
     cfg.MATTERPORT_DATA_DIR = "/path/to/mask3d_processed/matterport/train_validation_database.yaml"
-    cfg.SCANNET200_DATA_DIR = "/path/to/mask3d_processed/scannet200/train_validation_database.yaml"
+    cfg.SCANNET200_DATA_DIR = "/mnt/shared-storage-user/yicheng-data/Qwen-3D/data/mask3d_processed/scannet200/train_validation_database.yaml"
     cfg.AUGMENT_WITH_3D_SCALE = False
     cfg.AUGS_2D = False
     cfg.BALANCE_3D_DATASETS = False
@@ -315,7 +318,10 @@ def add_maskformer2_video_config(cfg):
     cfg.OPEN_VOCAB_SOFTMAX = False
 
     # Referrential Grounding Configs
-    cfg.SCANNET_ALIGN_MATRIX_PATH = 'qwen3d/data_video/scans_axis_alignment_matrices.json'
+    cfg.SCANNET_ALIGN_MATRIX_PATH = str(
+        Path(__file__).resolve().parent
+        / "data_video/scans_axis_alignment_matrices.json"
+    )
     cfg.USE_SCAN_ALIGN_MATRIX = True
     cfg.SAMPLING_FRACTION_RELEVANT_FRAMES = 0.5
     cfg.NO_GRAD = False
@@ -449,4 +455,18 @@ def add_maskformer2_video_config(cfg):
     cfg.LORA_RANK = 8
     cfg.LORA_ALPHA = 16
     cfg.LORA_DROPOUT = 0.1
-    cfg.QWEN_MODEL = "Qwen/Qwen2.5-VL-3B-Instruct"
+    # Prefer the repository's downloaded backbone when running from the
+    # prepared environment.  The Hub ID remains the fallback for users who
+    # intentionally run the project outside this checkout.
+    qwen_model = os.environ.get("QWEN_MODEL")
+    if not qwen_model:
+        repo_root = os.environ.get("QWEN3D_ROOT") or str(
+            Path(__file__).resolve().parents[1]
+        )
+        local_model = Path(repo_root) / "models/backbones/Qwen2.5-VL-3B-Instruct"
+        qwen_model = (
+            str(local_model)
+            if (local_model / "config.json").is_file()
+            else "Qwen/Qwen2.5-VL-3B-Instruct"
+        )
+    cfg.QWEN_MODEL = qwen_model

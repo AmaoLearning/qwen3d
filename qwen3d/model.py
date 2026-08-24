@@ -109,22 +109,54 @@ class Qwen3D(nn.Module):
                     if cfg.WANDB_NAME is None
                     else cfg.WANDB_NAME
                 )
-                wandb.init(
+                # Keep offline mode for environments without a configured API key by
+                # defaulting to WANDB_MODE=offline unless explicitly set.
+                wandb_mode = os.environ.get("WANDB_MODE", "offline").lower()
+                if wandb_mode not in {"online", "offline", "disabled"}:
+                    wandb_mode = "offline"
+
+                init_kwargs = dict(
                     entity=cfg.WANDB_ENTITY,
                     project=cfg.WANDB_PROJECT,
                     sync_tensorboard=True,
                     name=name,
                     resume="allow",
                     config=cfg,
-                    mode="online",
+                    mode=wandb_mode,
                     settings=wandb.Settings(init_timeout=120),
                     id=name,
                 )
 
+                try:
+                    wandb.init(**init_kwargs)
+                except Exception as err:
+                    if wandb_mode == "online":
+                        logger.warning(
+                            "Wandb online init failed, falling back to offline mode. "
+                            "Set WANDB_MODE=online and configure WANDB_API_KEY to enable logging. "
+                            "Error: %s",
+                            err,
+                        )
+                        init_kwargs["mode"] = "offline"
+                        wandb.init(**init_kwargs)
+                    else:
+                        raise
+
+        # Use the same configured backbone for both the processor and model.
+        # The old hard-coded Hub ID caused an offline run (including 7B runs)
+        # to contact Hugging Face even when QWEN_MODEL pointed at a local
+        # snapshot.
+        qwen_model_is_local = Path(cfg.QWEN_MODEL).is_dir()
+        logger.info(
+            "Loading Qwen backbone from %s (%s)",
+            cfg.QWEN_MODEL,
+            "local files" if qwen_model_is_local else "Hugging Face",
+        )
         self.qwen_processor = AutoProcessor.from_pretrained(
-            "Qwen/Qwen2.5-VL-3B-Instruct",
+            cfg.QWEN_MODEL,
             min_pixels=cfg.INPUT.MIN_PIXEL,
             max_pixels=cfg.INPUT.MAX_PIXEL,
+            local_files_only=qwen_model_is_local,
         )
         self.qwen_processor.tokenizer.add_special_tokens(
             {"additional_special_tokens": ["<|pointcloud_pad|>"]}
@@ -147,6 +179,7 @@ class Qwen3D(nn.Module):
             torch_dtype=torch.bfloat16,
             device_map=self.this_device,
             attn_implementation="sdpa",
+            local_files_only=qwen_model_is_local,
         )
 
         if cfg.FREEZE_QWEN:
@@ -1988,4 +2021,3 @@ def check_for_nans_in_dict(outputs_dict, prefix=""):
                         check_for_nans_in_dict(item, f"{current_key}[{i}]") or found_nan
                     )
     return found_nan
-

@@ -124,9 +124,18 @@ def get_data(get_clip_data: bool = True):
 def get_dataloader_filename_mapping(dataset_dict, scan_id):
     global text_data, image_data, scene_object_frame_map_filenames, scene_pixel_dict_with_dataloader_idxs, scene_full_scene_file_to_dataloder_ordered_list
 
+    def _norm_frame_name(name: str) -> str:
+        stem = Path(name).stem
+        try:
+            return str(int(stem))
+        except ValueError:
+            return stem
+
     pixel_dict = get_scene_object_pixel_counts(scan_id=scan_id)
-    dataloader_filenames = [Path(x).name for x in dataset_dict['file_names']]
-    scene_filenames = scene_object_frame_map_filenames[scan_id.removeprefix('scene')]
+    dataloader_filenames = [_norm_frame_name(x) for x in dataset_dict['file_names']]
+    scene_filenames = [
+        _norm_frame_name(x) for x in scene_object_frame_map_filenames[scan_id.removeprefix('scene')]
+    ]
 
     if scan_id not in scene_full_scene_file_to_dataloder_ordered_list:
         full_scene_file_idxs = []

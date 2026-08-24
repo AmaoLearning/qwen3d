@@ -47,6 +47,7 @@ from PIL import Image
 from pathlib import Path
 
 st = ipdb.set_trace
+logger = logging.getLogger(__name__)
 
 __all__ = ["ScannetppDatasetMapper"]
 
@@ -528,11 +529,19 @@ class ScannetppDatasetMapper:
             if (self.inpaint_depth and "ai2thor" not in self.dataset_name) or (
                 self.cfg.USE_ESTIMATED_DEPTH_FOR_2D and not self.actual_decoder_3d
             ):
-                # replace "depth" in "dpeth_file_names" path with "depth_inpainted" in dataset_dict
-                depth_file_names = [
+                candidate_depth_file_names = [
                     depth_file_names[i].replace("depth", self.cfg.DEPTH_PREFIX)
                     for i in range(len(depth_file_names))
                 ]
+                if all(os.path.isfile(path) for path in candidate_depth_file_names):
+                    depth_file_names = candidate_depth_file_names
+                else:
+                    logger.warning(
+                        "Requested depth prefix '%s' is unavailable for %s; "
+                        "falling back to original depth files.",
+                        self.cfg.DEPTH_PREFIX,
+                        self.dataset_name,
+                    )
             pose_file_names = dataset_dict.pop("pose_file_names", None)
             if self.cfg.USE_ESTIMATED_CAMERA_FOR_2D and not self.actual_decoder_3d:
                 pose_file_names = [
@@ -559,6 +568,11 @@ class ScannetppDatasetMapper:
         dataset_dict["image_ids"] = []
         dataset_dict["file_name"] = None
         dataset_dict["valid_class_ids"] = np.arange(len(self.class_names))
+
+        # ``check_image_size`` validates every frame, so provide the current
+        # frame name before each check and restore the canonical middle frame
+        # name after processing.
+        reference_file_name = file_names[eval_idx] if file_names else None
 
         if self.supervise_sparse or self.eval_sparse:
             dataset_dict["valids"] = []
@@ -595,8 +609,7 @@ class ScannetppDatasetMapper:
         total_dec_time = 0
 
         for frame_idx in selected_idx:
-            if eval_idx == frame_idx:
-                dataset_dict["file_name"] = file_names[frame_idx]
+            dataset_dict["file_name"] = file_names[frame_idx]
             dataset_dict["file_names"].append(file_names[frame_idx])
             dataset_dict["image_ids"].append(image_ids[frame_idx])
 
@@ -824,7 +837,9 @@ class ScannetppDatasetMapper:
                     dataset_dict["instances"] = instances
 
             dataset_dict["all_classes"] = all_classes
-            
+
+        dataset_dict["file_name"] = reference_file_name
+
         if (
             self.cfg.USE_GHOST_POINTS
             and decoder_3d

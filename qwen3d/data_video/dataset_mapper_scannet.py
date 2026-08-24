@@ -48,6 +48,7 @@ from PIL import Image
 from pathlib import Path
 
 st = ipdb.set_trace
+logger = logging.getLogger(__name__)
 
 __all__ = ["ScannetDatasetMapper"]
 
@@ -146,6 +147,7 @@ class ScannetDatasetMapper:
         logger = logging.getLogger(__name__)
         mode = "training" if is_train else "inference"
         logger.info(f"[DatasetMapper] Augmentations used in {mode}: {augmentations}")
+        self._logged_rgb_depth_resize = False
 
         if dataset_dict is not None:
             self.context_dataset_dicts = dataset_dict
@@ -506,11 +508,23 @@ class ScannetDatasetMapper:
             if (self.inpaint_depth and "ai2thor" not in self.dataset_name and 'scannetpp' not in self.dataset_name) or (
                 self.cfg.USE_ESTIMATED_DEPTH_FOR_2D and not self.actual_decoder_3d
             ):
-                # replace "depth" in "dpeth_file_names" path with "depth_inpainted" in dataset_dict
-                depth_file_names = [
+                # Prefer the optional inpainted/estimated depth when it is
+                # available.  The portable ScanNet package only contains the
+                # original depth directory, so fall back per sample instead
+                # of failing inside a dataloader worker with FileNotFoundError.
+                candidate_depth_file_names = [
                     depth_file_names[i].replace("depth", self.cfg.DEPTH_PREFIX)
                     for i in range(len(depth_file_names))
                 ]
+                if all(os.path.isfile(path) for path in candidate_depth_file_names):
+                    depth_file_names = candidate_depth_file_names
+                else:
+                    logger.warning(
+                        "Requested depth prefix '%s' is unavailable for %s; "
+                        "falling back to original depth files.",
+                        self.cfg.DEPTH_PREFIX,
+                        self.dataset_name,
+                    )
             pose_file_names = dataset_dict.pop("pose_file_names", None)
             if self.cfg.USE_ESTIMATED_CAMERA_FOR_2D and not self.actual_decoder_3d:
                 pose_file_names = [
@@ -537,6 +551,12 @@ class ScannetDatasetMapper:
         dataset_dict["image_ids"] = []
         dataset_dict["file_name"] = None
         dataset_dict["valid_class_ids"] = np.arange(len(self.class_names))
+
+        # ``check_image_size`` is called for every frame, but the canonical
+        # ``file_name`` is selected only for the middle frame below.  Keeping
+        # it unset made the first frame fail with a misleading TypeError when
+        # Detectron2 tried to include the filename in its error message.
+        reference_file_name = file_names[eval_idx] if file_names else None
 
         if self.supervise_sparse or self.eval_sparse:
             dataset_dict["valids"] = []
@@ -573,8 +593,9 @@ class ScannetDatasetMapper:
         total_dec_time = 0
 
         for frame_idx in selected_idx:
-            if eval_idx == frame_idx:
-                dataset_dict["file_name"] = file_names[frame_idx]
+            # Use the current frame while validating its dimensions.  Restore
+            # the middle-frame name after the loop for scene-level consumers.
+            dataset_dict["file_name"] = file_names[frame_idx]
             dataset_dict["file_names"].append(file_names[frame_idx])
             dataset_dict["image_ids"].append(image_ids[frame_idx])
 
@@ -585,6 +606,35 @@ class ScannetDatasetMapper:
             start_first = time.perf_counter()
             image = utils.read_image(file_names[frame_idx], format=self.image_format)
             total_start_time += time.perf_counter() - start_first
+
+            # ScanNet backprojection in this repository uses the canonical
+            # 640x480 depth intrinsics.  Some distributed
+            # ``frames_square_highres`` packages keep RGB at 1296x968 while
+            # depth remains 640x480, although the repository's own
+            # SensorData exporter resizes both streams to 640x480.  Align RGB
+            # to the depth grid before applying shared augmentations; merely
+            # resizing depth would require different camera intrinsics and
+            # would produce incorrect 3D points.
+            if decoder_3d:
+                with Image.open(depth_file_names[frame_idx]) as depth_image:
+                    depth_hw = (depth_image.height, depth_image.width)
+                if image.shape[:2] != depth_hw:
+                    original_hw = image.shape[:2]
+                    image = np.asarray(
+                        Image.fromarray(image).resize(
+                            (depth_hw[1], depth_hw[0]),
+                            resample=Image.Resampling.NEAREST,
+                        )
+                    )
+                    dataset_dict["height"], dataset_dict["width"] = depth_hw
+                    if not self._logged_rgb_depth_resize:
+                        logger.warning(
+                            "RGB/depth size mismatch for ScanNet data (%s vs %s); "
+                            "resizing RGB to the canonical depth grid.",
+                            original_hw,
+                            depth_hw,
+                        )
+                        self._logged_rgb_depth_resize = True
         
             if self.is_train and self.cfg.INPUT.COLOR_AUG:
                 image = np.asarray(self.image_augs(image))
@@ -818,6 +868,8 @@ class ScannetDatasetMapper:
                     dataset_dict["instances"] = instances
 
             dataset_dict["all_classes"] = all_classes
+
+        dataset_dict["file_name"] = reference_file_name
             
         if (
             self.cfg.USE_GHOST_POINTS

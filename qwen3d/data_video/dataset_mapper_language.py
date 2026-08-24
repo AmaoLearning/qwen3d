@@ -79,7 +79,7 @@ class Sr3dDatasetMapper:
         # else:
         #     t_type = "roberta-base"
         #     self.tokenizer = RobertaTokenizerFast.from_pretrained(t_type)
-        self.tokenizer = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct").tokenizer
+        self.tokenizer = AutoProcessor.from_pretrained(self.cfg.QWEN_MODEL).tokenizer
 
         self.USE_AUTO_NOUN_DETECTION = getattr(cfg, "USE_AUTO_NOUN_DETECTION", False)
         self.span_preds = None
@@ -577,4 +577,3 @@ class Sqa3dDatasetMapper:
         scene_data = self.scannet_mapper(scene_dict)
         aggregated_data = {**scene_data, **dataset_dict}
         return aggregated_data
-

@@ -251,8 +251,8 @@ def load_scannet_json_single(json_file, image_root, dataset_name=None):
     scene_dataset = []
     for scene_id, imgs in scenes.items():
         record = {}
-        record["height"] = image_dataset[0]["height"]
-        record["width"] = image_dataset[0]["width"]
+        record["height"] = image_dataset[imgs[0]]["height"]
+        record["width"] = image_dataset[imgs[0]]["width"]
         record["file_names"] = []
         record["depth_file_names"] = []
         record["pose_file_names"] = []

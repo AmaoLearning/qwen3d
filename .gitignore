@@ -136,6 +136,12 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.bootstrap/
+.python/
+.cache/
+.cuda/
+.mamba/
+models/
 venv/
 ENV/
 env.bak/

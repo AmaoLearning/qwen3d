@@ -68,7 +68,7 @@ class RefCocoDatasetMapper:
         # else:
         #     t_type = "roberta-base"
         #     self.tokenizer = RobertaTokenizerFast.from_pretrained(t_type)
-        self.tokenizer = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct").tokenizer
+        self.tokenizer = AutoProcessor.from_pretrained(self.cfg.QWEN_MODEL).tokenizer
 
     def process_lang_data(self, lang_dict, scene_dict):
         text_caption = lang_dict["caption"]

@@ -8,6 +8,7 @@
 
 export DATA_ROOT=/path/to/scannet_sens/groundtruth # path to scannet sens data (change here)
 export TARGET=/path/to/SEMSEG_100k/frames_square_highres   # data destination (change here)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 reader() {
     filename=$1
@@ -16,7 +17,12 @@ reader() {
     scene=$(basename -- "$filename")
     scene="${scene%.*}" 
     echo "Find sens data: $filename $scene"
-    python -u reader.py --filename $filename --output_path $TARGET/$scene --frame_skip $frame_skip 
+    python -u "$SCRIPT_DIR/reader.py" \
+        --filename "$filename" \
+        --output_path "$TARGET/$scene" \
+        --frame_skip "$frame_skip" \
+        --export_depth_images \
+        --export_color_images
 }
 
 export -f reader
