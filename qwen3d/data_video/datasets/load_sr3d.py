@@ -121,6 +121,13 @@ def load_ref(
 
     scannet_scenes = DatasetCatalog.get(scannet_split)
 
+    # Keep repair/smoke runs small without changing benchmark files.  The
+    # normal evaluation path leaves this unset and uses every validation scene.
+    smoke_limit = os.environ.get("QWEN3D_SMOKE_SCENES")
+    if smoke_limit and smoke_limit.isdigit() and int(smoke_limit) > 0:
+        limit = int(smoke_limit)
+        subsample_scenes = limit if subsample_scenes is None else min(subsample_scenes, limit)
+
     if subsample_scenes is not None:
         import random
         random.seed(0)
