@@ -131,7 +131,25 @@ def load_ref(
     if subsample_scenes is not None:
         import random
         random.seed(0)
-        scannet_scenes = random.sample(scannet_scenes, subsample_scenes)
+        # A scene subsample must come from the scenes represented by this
+        # annotation file. Randomly sampling the complete ScanNet split can
+        # produce an empty smoke set (SQA3D test has only a subset of the
+        # ScanNet validation scenes), which later fails in Detectron2's
+        # DatasetFromList with ``need at least one array to concatenate``.
+        annotation_scene_names = {
+            str(item.get("scan_id", item.get("scene_id")))
+            for item in sr3d_data
+            if item.get("scan_id", item.get("scene_id")) is not None
+        }
+        matching_scenes = [
+            scene for scene in scannet_scenes
+            if str(scene.get("image_id")) in annotation_scene_names
+        ]
+        if matching_scenes:
+            scannet_scenes = matching_scenes
+        scannet_scenes = random.sample(
+            scannet_scenes, min(subsample_scenes, len(scannet_scenes))
+        )
 
     scene_name_to_list_id = {}
     for i in range(len(scannet_scenes)):
