@@ -7,6 +7,7 @@ shift
 RUN_ROOT="$ROOT/output/benchmark_runs"
 EVAL_SCRIPT="${EVAL_SCRIPT:-repro/eval.sh}"
 RUN_TAG="${RUN_TAG:-}"
+MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 mkdir -p "$RUN_ROOT"
 
 run_one() {
@@ -17,7 +18,7 @@ run_one() {
   if [[ ! -f "$status" ]]; then
     printf 'gpu\tsize\ttask\tattempt\tstate\tstart\tend\trc\tlog\n' > "$status"
   fi
-  for attempt in 1 2 3; do
+  for ((attempt=1; attempt<=MAX_ATTEMPTS; attempt++)); do
     run="${label}_r${attempt}"
     log="$RUN_ROOT/${run}.log"
     start="$(date -Is)"
@@ -35,7 +36,7 @@ run_one() {
       return 0
     fi
     printf '%s\t%s\t%s\t%s\tFAILED\t%s\t%s\t%s\t%s\n' "$GPU" "$size" "$task" "$attempt" "$start" "$end" "$rc" "$log" >> "$status"
-    if [[ "$attempt" -lt 3 ]]; then sleep 10; fi
+    if [[ "$attempt" -lt "$MAX_ATTEMPTS" ]]; then sleep 10; fi
   done
   return 1
 }
