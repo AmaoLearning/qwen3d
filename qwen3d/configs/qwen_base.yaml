@@ -1,4 +1,7 @@
 _BASE_: base.yaml
+# Referenced by the ScanNet semantic evaluator; keep it explicit so
+# datasets that use the semantic branch do not fail on a missing YACS key.
+USE_CLASSIFICATION_ONLY_LOSS: False
 MODEL:
   PIXEL_MEAN: [0.0, 0.0, 0.0]
   PIXEL_STD: [255.0, 255.0, 255.0]
