@@ -260,8 +260,11 @@ def main() -> int:
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 decoded, _ = model([sample])
             prediction = decoded[0] if isinstance(decoded, list) else str(decoded)
+            question_id = row["question_id"]
+            if isinstance(question_id, str) and question_id.isdigit():
+                question_id = int(question_id)
             predictions.append({
-                "question_id": row["question_id"],
+                "question_id": question_id,
                 "scene_id": row["scene_id"],
                 "response_gt": [row["answer"]],
                 "response_pred": prediction.strip(),
