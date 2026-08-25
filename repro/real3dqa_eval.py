@@ -231,14 +231,19 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--projection-size", type=int, default=448)
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--num-shards", type=int, default=1)
     args = parser.parse_args()
+    if args.num_shards < 1 or not 0 <= args.shard_index < args.num_shards:
+        parser.error("--shard-index must be in [0, --num-shards)")
     args.checkpoint = ROOT / "models" / "qwen3d" / f"qwen3d_{args.size}.pth"
     args.backbone = ROOT / "models" / "backbones" / f"Qwen2.5-VL-{args.size.upper()}-Instruct"
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = Real3DQADataset(args.real3dqa_root, args.split, args.projection_size)
     rows = dataset.rows[: args.limit] if args.limit > 0 else dataset.rows
-    print(json.dumps({"split": args.split, "input": len(dataset.rows), "missing_pointcloud": len(dataset.missing), "running": len(rows)}, ensure_ascii=False), flush=True)
+    rows = rows[args.shard_index :: args.num_shards]
+    print(json.dumps({"split": args.split, "input": len(dataset.rows), "missing_pointcloud": len(dataset.missing), "running": len(rows), "shard": f"{args.shard_index}/{args.num_shards}"}, ensure_ascii=False), flush=True)
 
     from detectron2.checkpoint import DetectionCheckpointer
     from train import Trainer
@@ -265,7 +270,8 @@ def main() -> int:
             if (idx + 1) % 25 == 0 or idx + 1 == len(rows):
                 print(f"processed {idx + 1}/{len(rows)}", flush=True)
 
-    out_file = args.output_dir / f"{args.split}.json"
+    suffix = "" if args.num_shards == 1 else f".rank{args.shard_index:02d}"
+    out_file = args.output_dir / f"{args.split}{suffix}.json"
     out_file.write_text(json.dumps(predictions, ensure_ascii=False, indent=2) + "\n")
     manifest = {
         "size": args.size,
@@ -276,7 +282,7 @@ def main() -> int:
         "missing_pointcloud_rows": len(dataset.missing),
         "predicted_rows": len(predictions),
     }
-    (args.output_dir / f"{args.split}.manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (args.output_dir / f"{args.split}{suffix}.manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2), flush=True)
     return 0
 
