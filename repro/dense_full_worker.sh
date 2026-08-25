@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -u
+set -euo pipefail
 
 # Start one serialized full dense-evaluation queue after all of its baseline
 # and smoke gates have succeeded.  This script is intentionally offline: all
@@ -17,8 +17,22 @@ fi
 
 wait_success() {
   local file="$1"
-  while ! awk -F $'\t' '$5 == "SUCCESS" { ok=1 } END { exit !ok }' \
-      "$RUN_ROOT/$file" 2>/dev/null; do
+  local limit=3
+  [[ "$file" == *_dense_smoke_fix1.status.tsv ]] && limit=1
+  while true; do
+    if awk -F $'\t' '$5 == "SUCCESS" { ok=1 } END { exit !ok }' \
+        "$RUN_ROOT/$file" 2>/dev/null; then
+      return 0
+    fi
+    local attempts running
+    attempts="$(awk -F $'\t' '$4 ~ /^[0-9]+$/ && $4 > max { max=$4 } END { print max + 0 }' \
+      "$RUN_ROOT/$file" 2>/dev/null)"
+    running="$(awk -F $'\t' '$5 == "RUNNING" { n++ } END { print n + 0 }' \
+      "$RUN_ROOT/$file" 2>/dev/null)"
+    if (( attempts >= limit && running == 0 )); then
+      echo "gate failed after $attempts attempts: $file" >&2
+      return 1
+    fi
     sleep 30
   done
 }
