@@ -27,7 +27,11 @@ wait_success() {
     local attempts running
     attempts="$(awk -F $'\t' '$4 ~ /^[0-9]+$/ && $4 > max { max=$4 } END { print max + 0 }' \
       "$RUN_ROOT/$file" 2>/dev/null)"
-    running="$(awk -F $'\t' '$5 == "RUNNING" { n++ } END { print n + 0 }' \
+    running="$(awk -F $'\t' '
+      NR == 1 { next }
+      { state[$4] = $5 }
+      END { for (attempt in state) if (state[attempt] == "RUNNING") n++; print n + 0 }
+    ' \
       "$RUN_ROOT/$file" 2>/dev/null)"
     if (( attempts >= limit && running == 0 )); then
       echo "gate failed after $attempts attempts: $file" >&2
@@ -48,7 +52,7 @@ case "$GPU" in
   1)
     gates=(
       3b_nr3d.status.tsv 7b_nr3d.status.tsv
-      3b_nr3d_dense_smoke.status.tsv 7b_nr3d_dense_smoke_fix1.status.tsv
+      3b_nr3d_dense_smoke.status.tsv 7b_nr3d_dense_smoke_fix4.status.tsv
     )
     tasks=(3b:nr3d 7b:nr3d)
     ;;
