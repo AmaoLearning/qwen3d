@@ -10,6 +10,7 @@ TASK="${2:-sr3d}"
 USE_WANDB="${USE_WANDB:-False}"
 RUN_NAME="${RUN_NAME:-${SIZE}_${TASK}_$(date +%Y%m%d_%H%M%S)}"
 GENERATION_MODE=False
+TASK_OPTS=()
 case "$SIZE" in
   3b) CKPT="$ROOT/models/qwen3d/qwen3d_3b.pth"; BACKBONE="$ROOT/models/backbones/Qwen2.5-VL-3B-Instruct" ;;
   7b) CKPT="$ROOT/models/qwen3d/qwen3d_7b.pth"; BACKBONE="$ROOT/models/backbones/Qwen2.5-VL-7B-Instruct" ;;
@@ -46,6 +47,10 @@ case "$TASK" in
   scannet200)
     TRAIN="('scannet200_context_instance_train_200cls_single_highres_100k',)"
     TEST="('scannet200_context_instance_val_200cls_single_highres_100k',)"
+    # Detectron2 initializes SEM_SEG_HEAD.NUM_CLASSES to 54. ScanNet200
+    # uses the full 200-category vocabulary (with the two stuff classes
+    # excluded only by the instance evaluator), so make this explicit.
+    TASK_OPTS=(MODEL.SEM_SEG_HEAD.NUM_CLASSES 200)
     ;;
   *) echo "task must be sr3d, nr3d, scanrefer, scanqa, sqa3d, or scannet200" >&2; exit 2 ;;
 esac
@@ -71,4 +76,4 @@ BS=1 EVAL_ONLY=1 RESUME=0 NUM_VAL_DATALOADERS="${NUM_VAL_DATALOADERS:-2}" \
   GENERATION "$GENERATION_MODE" USE_AUTO_NOUN_DETECTION False INPUT.INPAINT_DEPTH False \
   USE_WANDB "$USE_WANDB" \
   MODEL.WEIGHTS "$CKPT" QWEN_MODEL "$BACKBONE" \
-  DATASETS.TRAIN "$TRAIN" DATASETS.TEST "$TEST" "${@:3}"
+  DATASETS.TRAIN "$TRAIN" DATASETS.TEST "$TEST" "${TASK_OPTS[@]}" "${@:3}"
