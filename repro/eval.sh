@@ -40,7 +40,7 @@ case "$TASK" in
     ;;
   sqa3d)
     TRAIN="('sqa3d_ref_scannet_train_single',)"
-    TEST="('sqa3d_ref_scannet_val_single_batched',)"
+    TEST="('sqa3d_ref_scannet_test_single_batched',)"
     GENERATION_MODE=True
     ;;
   scannet200)
@@ -56,7 +56,8 @@ if [[ "${QWEN3D_SMOKE:-0}" == "1" ]]; then
     scanrefer) TEST="('scanrefer_scannet_anchor_val_50_single_batched',)" ;;
     nr3d) TEST="('nr3d_ref_scannet_anchor_val_50_single_batched',)" ;;
     scanrefer_nr3d) TEST="('scanrefer_scannet_anchor_val_50_single_batched','nr3d_ref_scannet_anchor_val_50_single_batched',)" ;;
-    scanqa|sqa3d) : ;;
+    scanqa) TEST="('scanqa_ref_scannet_val_50_single_batched',)" ;;
+    sqa3d) TEST="('sqa3d_ref_scannet_test_2_single_batched',)" ;;
     scannet200) echo "scannet200 has no registered scene smoke split" >&2; exit 2 ;;
   esac
 fi
