@@ -18,7 +18,19 @@ run_one() {
   if [[ ! -f "$status" ]]; then
     printf 'gpu\tsize\ttask\tattempt\tstate\tstart\tend\trc\tlog\n' > "$status"
   fi
-  for ((attempt=1; attempt<=MAX_ATTEMPTS; attempt++)); do
+  if awk -F $'\t' '$5 == "SUCCESS" { ok=1 } END { exit !ok }' "$status" 2>/dev/null; then
+    return 0
+  fi
+  local last_attempt=0
+  last_attempt="$(awk -F $'\t' '
+    $4 ~ /^[0-9]+$/ && $4 > max { max=$4 }
+    END { print max + 0 }
+  ' "$status" 2>/dev/null)"
+  local first_attempt=$((last_attempt + 1))
+  if (( first_attempt > MAX_ATTEMPTS )); then
+    return 1
+  fi
+  for ((attempt=first_attempt; attempt<=MAX_ATTEMPTS; attempt++)); do
     run="${label}_r${attempt}"
     log="$RUN_ROOT/${run}.log"
     start="$(date -Is)"
