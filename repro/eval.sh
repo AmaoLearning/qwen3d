@@ -58,7 +58,7 @@ if [[ "${QWEN3D_SMOKE:-0}" == "1" ]]; then
     scanrefer_nr3d) TEST="('scanrefer_scannet_anchor_val_50_single_batched','nr3d_ref_scannet_anchor_val_50_single_batched',)" ;;
     scanqa) TEST="('scanqa_ref_scannet_val_50_single_batched',)" ;;
     sqa3d) TEST="('sqa3d_ref_scannet_test_2_single_batched',)" ;;
-    scannet200) echo "scannet200 has no registered scene smoke split" >&2; exit 2 ;;
+    scannet200) TEST="('scannet200_context_instance_debug_200cls_single_highres_100k',)" ;;
   esac
 fi
 
