@@ -936,6 +936,7 @@ def setup(args):
     add_deeplab_config(cfg)
     add_maskformer2_config(cfg)
     add_maskformer2_video_config(cfg)
+    cfg.USE_CLASSIFICATION_ONLY_LOSS = False
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     resolve_feature_dir_for_backbone(cfg)
