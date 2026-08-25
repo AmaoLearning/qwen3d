@@ -318,16 +318,34 @@ class Qwen2_5_VLVisionSdpaAttention(nn.Module):
             cos, sin = position_embeddings
         q, k = apply_rotary_pos_emb_vision(q, k, cos, sin)
 
-        attention_mask = torch.zeros([1, seq_length, seq_length], device=q.device, dtype=torch.bool)
-        for i in range(1, len(cu_seqlens)):
-            attention_mask[..., cu_seqlens[i - 1] : cu_seqlens[i], cu_seqlens[i - 1] : cu_seqlens[i]] = True
         q = q.transpose(0, 1)
         k = k.transpose(0, 1)
         v = v.transpose(0, 1)
-        attn_output = F.scaled_dot_product_attention(
-            q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attention_mask, dropout_p=0.0
-        )
-        attn_output = attn_output.squeeze(0).transpose(0, 1)
+
+        # The packed Qwen-VL vision sequence contains independent blocks
+        # described by ``cu_seqlens``. Building a dense [seq_len, seq_len]
+        # mask forces SDPA onto the math backend and can allocate tens of GiB
+        # for a 15-frame ScanNet input. Run equivalent block-diagonal
+        # attention one segment at a time so Flash/MemEfficient SDPA can be
+        # used without changing the attention semantics.
+        chunks = []
+        boundaries = cu_seqlens.detach().cpu().tolist()
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            if end <= start:
+                continue
+            chunks.append(
+                F.scaled_dot_product_attention(
+                    q[:, start:end].unsqueeze(0),
+                    k[:, start:end].unsqueeze(0),
+                    v[:, start:end].unsqueeze(0),
+                    None,
+                    dropout_p=0.0,
+                ).squeeze(0)
+            )
+        if chunks:
+            attn_output = torch.cat(chunks, dim=1).transpose(0, 1)
+        else:
+            attn_output = q.new_empty((0, q.shape[-1] * q.shape[0]))
         attn_output = attn_output.reshape(seq_length, -1)
         attn_output = self.proj(attn_output)
         return attn_output
