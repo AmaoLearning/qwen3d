@@ -1,7 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # inpaint_depth adapted from ODIN (https://github.com/ayushjain1144/odin)
 
-import cv2
+try:
+  import cv2
+except ImportError:
+  cv2 = None
 import numpy as np
 
 
@@ -15,6 +18,8 @@ def inpaint_depth(depth: np.ndarray) -> np.ndarray:
         Depth array with holes (depth == 0) filled in-place style on a copy.
     """
     depth = np.asarray(depth, dtype=np.float32)
+    if cv2 is None:
+        return depth.copy()
     mask = (depth == 0).astype(np.uint8)
     depth_inpaint = cv2.inpaint(depth, mask, 5, cv2.INPAINT_TELEA)
     out = depth.copy()

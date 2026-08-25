@@ -5,12 +5,15 @@ ROOT="/mnt/shared-storage-user/yicheng-data/Qwen-3D"
 GPU="${1:?GPU index required}"
 shift
 RUN_ROOT="$ROOT/output/benchmark_runs"
+EVAL_SCRIPT="${EVAL_SCRIPT:-repro/eval.sh}"
+RUN_TAG="${RUN_TAG:-}"
 mkdir -p "$RUN_ROOT"
 
 run_one() {
-  local size="$1" task="$2" label="${size}_${task}"
-  local status="$RUN_ROOT/${label}.status.tsv"
+  local size="$1" task="$2" label
   local attempt log run rc start end metric_source
+  label="${size}_${task}${RUN_TAG}"
+  local status="$RUN_ROOT/${label}.status.tsv"
   if [[ ! -f "$status" ]]; then
     printf 'gpu\tsize\ttask\tattempt\tstate\tstart\tend\trc\tlog\n' > "$status"
   fi
@@ -22,7 +25,7 @@ run_one() {
     set +e
     cd "$ROOT"
     CUDA_VISIBLE_DEVICES="$GPU" RUN_NAME="$run" NUM_VAL_DATALOADERS=2 NUM_DATALOADERS=2 \
-      bash repro/eval.sh "$size" "$task" > "$log" 2>&1
+      bash "$EVAL_SCRIPT" "$size" "$task" > "$log" 2>&1
     rc=$?
     set -e
     end="$(date -Is)"

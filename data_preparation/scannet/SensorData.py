@@ -10,8 +10,23 @@ import os, struct
 import numpy as np
 import zlib
 import imageio
-import cv2
-from qwen3d.utils.inpaint_depth import inpaint_depth
+from PIL import Image
+try:
+  import cv2
+except ImportError:
+  cv2 = None
+try:
+  from qwen3d.utils.inpaint_depth import inpaint_depth
+except Exception:
+  def inpaint_depth(depth):
+    return np.asarray(depth).copy()
+
+def resize_nearest(array, width, height):
+  if cv2 is not None:
+    return cv2.resize(array, (width, height), interpolation=cv2.INTER_NEAREST)
+  mode = Image.Resampling.NEAREST if hasattr(Image, "Resampling") else Image.NEAREST
+  return np.asarray(Image.fromarray(array).resize((width, height), resample=mode))
+
 
 COMPRESSION_TYPE_COLOR = {-1:'unknown', 0:'raw', 1:'png', 2:'jpeg'}
 COMPRESSION_TYPE_DEPTH = {-1:'unknown', 0:'raw_ushort', 1:'zlib_ushort', 2:'occi_ushort'}
@@ -19,13 +34,19 @@ COMPRESSION_TYPE_DEPTH = {-1:'unknown', 0:'raw_ushort', 1:'zlib_ushort', 2:'occi
 class RGBDFrame():
 
   def load(self, file_handle):
-    self.camera_to_world = np.asarray(struct.unpack('f'*16, file_handle.read(16*4)), dtype=np.float32).reshape(4, 4)
-    self.timestamp_color = struct.unpack('Q', file_handle.read(8))[0]
-    self.timestamp_depth = struct.unpack('Q', file_handle.read(8))[0]
-    self.color_size_bytes = struct.unpack('Q', file_handle.read(8))[0]
-    self.depth_size_bytes = struct.unpack('Q', file_handle.read(8))[0]
-    self.color_data = b''.join(struct.unpack('c'*self.color_size_bytes, file_handle.read(self.color_size_bytes)))
-    self.depth_data = b''.join(struct.unpack('c'*self.depth_size_bytes, file_handle.read(self.depth_size_bytes)))
+    def read_exact(size):
+      data = file_handle.read(size)
+      if len(data) != size:
+        raise EOFError(f"short .sens frame: expected {size}, got {len(data)}")
+      return data
+
+    self.camera_to_world = np.frombuffer(read_exact(16 * 4), dtype=np.float32).reshape(4, 4)
+    self.timestamp_color = struct.unpack('Q', read_exact(8))[0]
+    self.timestamp_depth = struct.unpack('Q', read_exact(8))[0]
+    self.color_size_bytes = struct.unpack('Q', read_exact(8))[0]
+    self.depth_size_bytes = struct.unpack('Q', read_exact(8))[0]
+    self.color_data = read_exact(self.color_size_bytes)
+    self.depth_data = read_exact(self.depth_size_bytes)
 
 
   def decompress_depth(self, compression_type):
@@ -95,7 +116,7 @@ class SensorData:
       depth_data = self.frames[f].decompress_depth(self.depth_compression_type)
       depth = np.fromstring(depth_data, dtype=np.uint16).reshape(self.depth_height, self.depth_width)
       if image_size is not None:
-        depth = cv2.resize(depth, (image_size[1], image_size[0]), interpolation=cv2.INTER_NEAREST)
+        depth = resize_nearest(depth, image_size[1], image_size[0])
       imageio.imwrite(os.path.join(output_path, str(f) + '.png'), depth)
       
       # also run opencv depth inpainting
@@ -116,7 +137,7 @@ class SensorData:
         print('exporting', f, 'th color frames to', os.path.join(output_path, str(f) + '.png'))
       color = self.frames[f].decompress_color(self.color_compression_type)
       if image_size is not None:
-        color = cv2.resize(color, (image_size[1], image_size[0]), interpolation=cv2.INTER_NEAREST)
+        color = resize_nearest(color, image_size[1], image_size[0])
       # imageio.imwrite(os.path.join(output_path, str(f) + '.jpg'), color)
       imageio.imwrite(os.path.join(output_path, str(f) + '.png'), color)
 

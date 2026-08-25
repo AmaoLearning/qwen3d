@@ -37,6 +37,22 @@ def scene_ids(root: Path) -> list[str]:
         data = pd.read_csv(path)
         column = "scan_id" if "scan_id" in data.columns else "scene_id"
         out.update(data[column].astype(str).tolist())
+    # Include official QA validation and test scenes in addition to the grounding union.
+    for filename in (
+        "ScanQA_v1.0_val.json",
+        "ScanQA_v1.0_test_w_obj.json",
+        "SQA_val.json",
+        "SQA_test.json",
+    ):
+        path = root / filename
+        if not path.is_file():
+            continue
+        payload = json.loads(path.read_text())
+        records = payload.get("questions", payload.get("data", [])) if isinstance(payload, dict) else payload
+        for record in records:
+            scene = record.get("scene_id", record.get("scan_id"))
+            if scene is not None:
+                out.add(str(scene))
     return sorted(out)
 
 
@@ -53,8 +69,13 @@ def download(url: str, destination: Path, attempts: int) -> None:
                 request.add_header("Range", f"bytes={offset}-")
             # Keep a failed endpoint from occupying a worker for minutes.  A
             # retry is deliberately counted at the scene level.
-            with urllib.request.urlopen(request, timeout=20, context=context) as response:
+            with urllib.request.urlopen(request, timeout=300, context=context) as response:
                 status = getattr(response, "status", None)
+                content_range = response.headers.get("Content-Range", "")
+                if "/" in content_range:
+                    total_size = int(content_range.rsplit("/", 1)[1])
+                else:
+                    total_size = int(response.headers.get("Content-Length", "0") or 0) + (offset if status == 206 else 0)
                 mode = "ab" if offset and status == 206 else "wb"
                 if offset and status != 206:
                     offset = 0
@@ -64,6 +85,8 @@ def download(url: str, destination: Path, attempts: int) -> None:
                         if not chunk:
                             break
                         handle.write(chunk)
+            if total_size and part.stat().st_size < total_size:
+                raise IOError(f"incomplete download: {part.stat().st_size}/{total_size} bytes")
             os.replace(part, destination)
             return
         except Exception as exc:  # network/proxy errors are expected here
