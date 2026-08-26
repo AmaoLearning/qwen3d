@@ -107,7 +107,9 @@ def main():
 
     require_path(backbone / "config.json", "local Qwen-VL backbone")
     require_path(checkpoint, "Qwen-3D checkpoint")
-    require_path(feature_dir, "precomputed 3D visual features")
+    # FEATURE_DIR is only consumed when CACHE_QWEN_FEATURES is enabled.  The
+    # prepared yicloud runs encode RGB frames directly, so an absent optional
+    # cache directory must not block post-training.
     require_path(root / "data/refer_it_3d" / annotation_file, "3D QA training data")
     require_path(
         root / "data/mask3d_processed/scannet200/train_validation_database.yaml",
