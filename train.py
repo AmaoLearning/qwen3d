@@ -544,7 +544,7 @@ class Trainer(DefaultTrainer):
         # be saved by checkpointer.
         # This is not always the best: if checkpointing has a different frequency,
         # some checkpoints may have more precise statistics than others.
-        if comm.is_main_process():
+        if comm.is_main_process() and not cfg.RFT_LOSS.SMOKE_TEST:
             ret.append(
                 hooks.PeriodicCheckpointer(
                     self.checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD,
@@ -558,7 +558,8 @@ class Trainer(DefaultTrainer):
 
         # Do evaluation after checkpointer, because then if it fails,
         # we can use the saved checkpoint to debug.
-        ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
+        if not cfg.RFT_LOSS.SMOKE_TEST:
+            ret.append(hooks.EvalHook(cfg.TEST.EVAL_PERIOD, test_and_save_results))
 
         if comm.is_main_process():
             # Here the default print/log frequency of each writer is used.

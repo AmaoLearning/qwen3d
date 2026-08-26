@@ -455,6 +455,25 @@ def add_maskformer2_video_config(cfg):
     cfg.LORA_RANK = 8
     cfg.LORA_ALPHA = 16
     cfg.LORA_DROPOUT = 0.1
+
+    # Optional token-level 3D reweighted fine-tuning.  It is disabled in the
+    # base config to preserve every existing Qwen-3D training command.  The
+    # dedicated LoRA post-training launcher enables it and defaults to the
+    # focal-style (1 - p_phi) ** gamma weight requested for the experiments.
+    cfg.RFT_LOSS = CN()
+    cfg.RFT_LOSS.ENABLED = False
+    cfg.RFT_LOSS.TYPE = "focal"
+    cfg.RFT_LOSS.GAMMA = 1.0
+    cfg.RFT_LOSS.EPS = 1e-6
+    # The original Qwen answer-token CE is always retained when RFT is
+    # enabled.  These coefficients control the additive combination before
+    # MODEL.MASK_FORMER.GENERATION_WEIGHT is applied.
+    cfg.RFT_LOSS.ORIGINAL_COEF = 1.0
+    cfg.RFT_LOSS.RFT_COEF = 1.0
+    cfg.RFT_LOSS.LOG_INTERVAL = 20
+    # Smoke mode suppresses evaluation and multi-GB checkpoints.  It does not
+    # alter the forward/backward/optimizer path.
+    cfg.RFT_LOSS.SMOKE_TEST = False
     # Prefer the repository's downloaded backbone when running from the
     # prepared environment.  The Hub ID remains the fallback for users who
     # intentionally run the project outside this checkout.

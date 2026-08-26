@@ -46,6 +46,11 @@ from qwen3d.modeling_qwen2_5_vl_modified import (
     Qwen2_5_VLForConditionalGeneration,
     build_full_mask,
 )
+from qwen3d.modeling.rft_loss import (
+    RFT_LOSS_TYPES,
+    combine_post_training_losses,
+    compute_rft_loss,
+)
 from qwen3d.utils import vis_utils
 from qwen3d.utils.misc import is_dist_avail_and_initialized
 from qwen3d.utils.util_3d import sample_2D_indices
@@ -214,6 +219,36 @@ class Qwen3D(nn.Module):
                 self.qwen_model.enable_input_require_grads()
                 self.qwen_model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
 
+        if cfg.RFT_LOSS.ENABLED:
+            if not cfg.USE_LORA:
+                raise ValueError("RFT_LOSS requires USE_LORA=True")
+            if not cfg.GENERATION:
+                raise ValueError("RFT_LOSS requires GENERATION=True")
+            if cfg.RFT_LOSS.TYPE not in RFT_LOSS_TYPES:
+                raise ValueError(
+                    f"Unknown RFT_LOSS.TYPE={cfg.RFT_LOSS.TYPE!r}; "
+                    f"expected one of {RFT_LOSS_TYPES}"
+                )
+            if cfg.RFT_LOSS.ORIGINAL_COEF < 0 or cfg.RFT_LOSS.RFT_COEF < 0:
+                raise ValueError("RFT loss coefficients must be non-negative")
+            if (
+                cfg.RFT_LOSS.ORIGINAL_COEF == 0
+                and (
+                    cfg.RFT_LOSS.TYPE == "original"
+                    or cfg.RFT_LOSS.RFT_COEF == 0
+                )
+            ):
+                raise ValueError("At least one active RFT loss coefficient must be positive")
+            logger.info(
+                "3D RFT enabled: type=%s gamma=%s original_coef=%s rft_coef=%s; "
+                "p_phi is the frozen base "
+                "Qwen-VL with LoRA disabled and 3D inputs zeroed",
+                cfg.RFT_LOSS.TYPE,
+                cfg.RFT_LOSS.GAMMA,
+                cfg.RFT_LOSS.ORIGINAL_COEF,
+                cfg.RFT_LOSS.RFT_COEF,
+            )
+
         qwen_visual = getattr(self.qwen_model, "visual", None)
         if qwen_visual is None and hasattr(self.qwen_model, "base_model"):
             qwen_visual = getattr(self.qwen_model.base_model.model, "visual", None)
@@ -256,6 +291,7 @@ class Qwen3D(nn.Module):
         self.supervise_sparse = supervise_sparse
         self.eval_sparse = eval_sparse
         self.cfg = cfg
+        self._rft_forward_steps = 0
 
         self.tokenizer = self.qwen_processor.tokenizer
 
@@ -373,6 +409,108 @@ class Qwen3D(nn.Module):
         if getattr(self, "visual", None) is not None:
             self.visual.eval()
         return self
+
+    @staticmethod
+    def _zero_nested_3d(value):
+        """Zero tensors while preserving the list/tuple structure Qwen RoPE expects."""
+        if isinstance(value, torch.Tensor):
+            return torch.zeros_like(value)
+        if isinstance(value, list):
+            return [Qwen3D._zero_nested_3d(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(Qwen3D._zero_nested_3d(item) for item in value)
+        return value
+
+    def _build_blind_qwen_inputs(self, inputs):
+        """Build the text-only input used by the Real-3DQA blind pass.
+
+        The sequence layout remains unchanged, while point-token embeddings
+        and both pixel/xyz positional signals are zeroed.  This follows the
+        official pseudocode's zero-point-cloud construction without loading a
+        second copy of the 3B/7B backbone.
+        """
+        blind_inputs = dict(inputs)
+        point_token_id = self.qwen_model.config.pointcloud_token_id
+        point_mask = blind_inputs["input_ids"].eq(point_token_id).unsqueeze(-1)
+        blind_embeds = blind_inputs["inputs_embeds"].detach().clone()
+        blind_inputs["inputs_embeds"] = blind_embeds.masked_fill(point_mask, 0.0)
+        for key in ("pointcloud_xyz", "pointcloud_pixel_pos"):
+            if key in blind_inputs:
+                blind_inputs[key] = self._zero_nested_3d(blind_inputs[key])
+        blind_inputs["output_hidden_states"] = False
+        blind_inputs["use_cache"] = False
+        return blind_inputs
+
+    def _compute_rft_generation_loss(self, text_head_outputs, inputs):
+        """Apply exactly one configured weight to the ordinary answer-token CE."""
+        loss_type = self.cfg.RFT_LOSS.TYPE
+        if loss_type == "original":
+            return combine_post_training_losses(
+                text_head_outputs.loss,
+                None,
+                original_coef=self.cfg.RFT_LOSS.ORIGINAL_COEF,
+                rft_coef=self.cfg.RFT_LOSS.RFT_COEF,
+            )
+        if text_head_outputs.logits is None:
+            raise RuntimeError(
+                "RFT loss needs generation logits; use a 3D QA dataset with "
+                "do_generate/generate_only enabled"
+            )
+
+        blind_inputs = self._build_blind_qwen_inputs(inputs)
+        with torch.no_grad():
+            # Disabling the PEFT adapter also disables its optional lm_head
+            # adapter, yielding the original, frozen Qwen-VL distribution.
+            with self.qwen_model.disable_adapter():
+                phi_outputs = self.qwen_model(**blind_inputs)
+
+            theta_blind_outputs = None
+            if loss_type == "paper_ratio":
+                theta_blind_outputs = self.qwen_model(**blind_inputs)
+
+        result = compute_rft_loss(
+            full_logits=text_head_outputs.logits,
+            labels=inputs["labels"],
+            answer_start=inputs["answer_start"],
+            loss_type=loss_type,
+            phi_logits=phi_outputs.logits,
+            theta_blind_logits=(
+                theta_blind_outputs.logits
+                if theta_blind_outputs is not None
+                else None
+            ),
+            gamma=self.cfg.RFT_LOSS.GAMMA,
+            eps=self.cfg.RFT_LOSS.EPS,
+        )
+
+        self._rft_forward_steps += 1
+        log_interval = max(int(self.cfg.RFT_LOSS.LOG_INTERVAL), 1)
+        combined_loss = combine_post_training_losses(
+            text_head_outputs.loss,
+            result.loss,
+            original_coef=self.cfg.RFT_LOSS.ORIGINAL_COEF,
+            rft_coef=self.cfg.RFT_LOSS.RFT_COEF,
+        )
+        if comm.is_main_process() and (
+            self._rft_forward_steps == 1
+            or self._rft_forward_steps % log_interval == 0
+        ):
+            stats = " ".join(
+                f"{name}={float(value):.6g}"
+                for name, value in result.statistics.items()
+            )
+            logger.info(
+                "RFT step=%d type=%s gamma=%s original_loss=%.6g "
+                "weighted_loss=%.6g combined_loss=%.6g %s",
+                self._rft_forward_steps,
+                loss_type,
+                self.cfg.RFT_LOSS.GAMMA,
+                float(text_head_outputs.loss.detach()),
+                float(result.loss.detach()),
+                float(combined_loss.detach()),
+                stats,
+            )
+        return combined_loss
 
     def load_3d_data(self, batched_inputs, images_shape):
         valids = None
@@ -987,6 +1125,11 @@ class Qwen3D(nn.Module):
 
         bs = len(batched_inputs)
         assert bs == 1, "Currently only batch size of 1 is supported for qwen3D design"
+        if self.training and self.cfg.RFT_LOSS.ENABLED:
+            if not decoder_3d or not actual_decoder_3d:
+                raise RuntimeError("RFT_LOSS currently supports genuine 3D batches only")
+            if batched_inputs[0].get("text_only", False):
+                raise RuntimeError("RFT_LOSS does not support text-only batches")
 
         if not batched_inputs[0].get("text_only", False):
             images = []
@@ -1304,6 +1447,10 @@ class Qwen3D(nn.Module):
             text_head_outputs = self.qwen_model(**inputs)
             text_output_features = text_head_outputs.hidden_states[-1]
             text_loss = text_head_outputs.loss
+            if self.training and self.cfg.RFT_LOSS.ENABLED:
+                text_loss = self._compute_rft_generation_loss(
+                    text_head_outputs, inputs
+                )
         else:
             inputs["use_cache"] = True
             if not batched_inputs[0].get("text_only", False):
