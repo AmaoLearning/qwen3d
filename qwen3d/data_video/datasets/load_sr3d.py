@@ -151,6 +151,20 @@ def load_ref(
             scannet_scenes, min(subsample_scenes, len(scannet_scenes))
         )
 
+        # Training receives individual annotation dictionaries rather than
+        # scene-batched lists.  Keep its QA rows in lockstep with the sampled
+        # scene table; otherwise the mapper can draw an annotation whose scene
+        # was removed and fail with a scene_to_id_map KeyError.
+        sampled_scene_names = {
+            str(scene.get("image_id")) for scene in scannet_scenes
+        }
+        sr3d_data = [
+            item
+            for item in sr3d_data
+            if str(item.get("scan_id", item.get("scene_id")))
+            in sampled_scene_names
+        ]
+
     scene_name_to_list_id = {}
     for i in range(len(scannet_scenes)):
         scene_name_to_list_id[scannet_scenes[i]['image_id']] = i
