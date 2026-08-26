@@ -38,6 +38,30 @@ import ipdb
 
 st = ipdb.set_trace
 
+
+def _nearest_squared_distances(query, reference, chunk_size=4096):
+    """Return the nearest squared L2 distance for every query point.
+
+    PyTorch3D wheels are occasionally installed without CUDA kernels.  Keep
+    the normal fused implementation, but fall back to a chunked native-torch
+    calculation so training can still run on CUDA without materializing the
+    full query-by-reference distance matrix.
+    """
+    try:
+        return knn_points(query[None], reference[None]).dists[0, :, 0]
+    except RuntimeError as error:
+        if "Not compiled with GPU support" not in str(error):
+            raise
+
+    nearest = []
+    with torch.no_grad():
+        for start in range(0, query.shape[0], chunk_size):
+            distances = torch.cdist(
+                query[start : start + chunk_size], reference
+            )
+            nearest.append(distances.square().amin(dim=1))
+    return torch.cat(nearest, dim=0)
+
 def expand_tensor(arr, num_frames, orig_bs):
     if isinstance(arr, torch.Tensor):
         if arr.shape[0] == 1:
@@ -193,8 +217,8 @@ def load_scannet_data(
                     core_pc.to(device).to(scannet_pc.dtype)
                 )
                 # import pdb; pdb.set_trace()
-                dists_idxs = knn_points(scannet_pc[None], our_pc[None])
-                dists_close = dists_idxs.dists.squeeze() < cfg.KNN_THRESH
+                nearest_dists = _nearest_squared_distances(scannet_pc, our_pc)
+                dists_close = nearest_dists < cfg.KNN_THRESH
                 
                 # st()
                 # from qwen3d.utils.vis_utils import visualize_knn_sensor_mesh_pc
