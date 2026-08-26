@@ -50,6 +50,15 @@ def parse_args():
     parser.add_argument("--num-gpus", type=int, default=1)
     parser.add_argument("--smoke-scenes", type=int, default=1)
     parser.add_argument("--sampling-frame-num", type=int, default=3)
+    parser.add_argument(
+        "--use-relevant-frame-map",
+        action="store_true",
+        help=(
+            "Use Qwen-3D's precomputed object-relevant frame map. The prepared "
+            "yicloud data does not include this optional cache, so consecutive "
+            "3D frame sampling is the default."
+        ),
+    )
     parser.add_argument("--lora-rank", type=int, default=8)
     parser.add_argument("--lora-alpha", type=int, default=16)
     parser.add_argument("--lora-dropout", type=float, default=0.1)
@@ -181,6 +190,8 @@ def main():
         "False",
         "INPUT.INPAINT_DEPTH",
         "False",
+        "SAMPLING_STRATEGY_REF",
+        str(args.use_relevant_frame_map),
         "SOLVER.MAX_ITER",
         str(args.max_iter),
         "SOLVER.BASE_LR",
