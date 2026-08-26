@@ -59,7 +59,10 @@ from .modeling.criterion import VideoSetCriterion
 from .modeling.matcher import VideoHungarianMatcher
 from .utils.memory import retry_if_cuda_oom
 
-logger = logging.getLogger(__name__)
+# Detectron2 configures handlers for this namespace in its default setup.
+# Keeping Qwen-3D underneath it makes RFT statistics visible in both stdout
+# and OUTPUT_DIR/log.txt during smoke tests and full training.
+logger = logging.getLogger("detectron2.qwen3d")
 
 
 @META_ARCH_REGISTRY.register()
