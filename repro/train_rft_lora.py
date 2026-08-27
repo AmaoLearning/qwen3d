@@ -60,6 +60,18 @@ def parse_args():
     parser.add_argument("--rft-loss-coef", type=float, default=1.0)
     parser.add_argument("--generation-weight", type=float, default=5.0)
     parser.add_argument("--num-gpus", type=int, default=1)
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=2,
+        help="Training dataloader workers per GPU process (8 GPUs => 16 by default).",
+    )
+    parser.add_argument(
+        "--num-val-workers",
+        type=int,
+        default=2,
+        help="Validation dataloader workers per GPU process.",
+    )
     parser.add_argument("--smoke-scenes", type=int, default=1)
     parser.add_argument("--sampling-frame-num", type=int, default=3)
     parser.add_argument(
@@ -97,6 +109,8 @@ def main():
         raise ValueError("--gamma must be positive")
     if args.num_gpus < 1:
         raise ValueError("--num-gpus must be at least 1")
+    if args.num_workers < 0 or args.num_val_workers < 0:
+        raise ValueError("dataloader worker counts must be non-negative")
     if args.smoke_scenes < 1:
         raise ValueError("--smoke-scenes must be at least 1")
     if min(
@@ -165,8 +179,8 @@ def main():
             "EVAL_ONLY": "0",
             "RESUME": "0",
             "BS": "1",
-            "NUM_DATALOADERS": "0",
-            "NUM_VAL_DATALOADERS": "0",
+            "NUM_DATALOADERS": str(args.num_workers),
+            "NUM_VAL_DATALOADERS": str(args.num_val_workers),
             "SAMPLING_FRAME_NUM": str(args.sampling_frame_num),
             "CHECKPOINT_PERIOD": str(args.max_iter + 1),
             "EVAL_PERIOD": str(args.max_iter + 1),
@@ -254,7 +268,9 @@ def main():
         f"rft_coef={args.rft_loss_coef} "
         f"generation_weight={args.generation_weight} smoke={smoke} "
         f"scene_limit={args.smoke_scenes if smoke else 'all'} "
-        f"find_unused_parameters={args.num_gpus > 1}"
+        f"find_unused_parameters={args.num_gpus > 1} "
+        f"workers_per_rank={args.num_workers} "
+        f"val_workers_per_rank={args.num_val_workers}"
     )
     print("command=" + " ".join(command))
     if args.dry_run:

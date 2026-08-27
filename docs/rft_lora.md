@@ -60,6 +60,11 @@ Single-node NCCL P2P is enabled by default so the 8xH200 NVSwitch fabric is
 used for DDP collectives. Set `NCCL_P2P_DISABLE=1` explicitly only as a
 compatibility fallback for a node without working CUDA peer access.
 
+The launcher defaults to two training and two validation dataloader workers
+per GPU process. On the 8xH200 gpu3 node this creates 16 workers per phase,
+well below its 192 logical CPUs and 2 TiB RAM. Use `--num-workers` and
+`--num-val-workers` to tune the per-rank counts; these are not global counts.
+
 For example, the combined eight-GPU post-training entry point is:
 
 ```bash
