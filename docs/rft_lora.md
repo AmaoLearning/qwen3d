@@ -64,6 +64,9 @@ The launcher defaults to two training and two validation dataloader workers
 per GPU process. On the 8xH200 gpu3 node this creates 16 workers per phase,
 well below its 192 logical CPUs and 2 TiB RAM. Use `--num-workers` and
 `--num-val-workers` to tune the per-rank counts; these are not global counts.
+Matched 8-GPU measurements found no steady-state gain from increasing two to
+four workers per rank, while four doubled startup/prefetch pressure on shared
+GPFS, so two is the hardware-tested default rather than a CPU-count heuristic.
 
 For example, the combined eight-GPU post-training entry point is:
 
