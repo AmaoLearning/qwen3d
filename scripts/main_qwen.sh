@@ -47,7 +47,10 @@ fi
 
 DIR="$(dirname "$PWD")"
 export PYTHONPATH=$DIR:$DIR/pretrain
-export NCCL_P2P_DISABLE=1
+# The target 8xH200 node is fully connected through NVSwitch (NV18 between
+# every GPU pair).  Let NCCL use CUDA P2P/NVLink by default while retaining an
+# escape hatch for nodes whose topology requires it to be disabled.
+export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-0}
 export NCCL_IB_DISABLE=1
 export NCCL_DEBUG=INFO
 # export TORCH_USE_CUDA_DSA=1  # Enable CUDA DSA for better performance

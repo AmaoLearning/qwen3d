@@ -56,6 +56,10 @@ gradients on every rank.
 Full-run VQA evaluation uses pycocoevalcap METEOR and therefore requires a
 Java runtime on the GPU node (Ubuntu: `apt-get install default-jre-headless`).
 
+Single-node NCCL P2P is enabled by default so the 8xH200 NVSwitch fabric is
+used for DDP collectives. Set `NCCL_P2P_DISABLE=1` explicitly only as a
+compatibility fallback for a node without working CUDA peer access.
+
 For example, the combined eight-GPU post-training entry point is:
 
 ```bash
