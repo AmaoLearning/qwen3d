@@ -94,3 +94,25 @@ python repro/train_rft_lora.py \
 To exercise the requested focal exponents, run the command with `--gamma 0.5`,
 `--gamma 1`, and `--gamma 2`. Outputs are isolated under
 `output/rft_lora/<unique-run-name>`.
+
+## Full 3B ablation campaign
+
+`repro/run_rft_ablation.py` runs the ordinary-CE post-training control and all
+six RFT variants concurrently on GPUs 0-6. Each process keeps effective batch
+16 using one GPU with 16-way gradient accumulation. GPU 7 evaluates the
+untouched Qwen-3D checkpoint. Training jobs use the concatenated SQA3D+ScanQA
+training set and automatically evaluate both test splits after saving their
+own final checkpoint. Every variant has a separate model root and log, and the
+campaign writes `comparison.json` plus `comparison.md` with deltas from the
+untouched checkpoint.
+
+SR3D, ScanRefer, NR3D, ScanNet segmentation, and Matterport are deliberately
+excluded: their annotations do not contain the answer lists required by the
+QA-RFT token loss. Start the one-epoch campaign with:
+
+```bash
+nohup python repro/run_rft_ablation.py \
+  --max-iter 6563 \
+  --gradient-accumulation-steps 16 \
+  > output/rft_ablation_launcher.log 2>&1 &
+```

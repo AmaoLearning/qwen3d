@@ -26,11 +26,13 @@ DATASETS = {
     "sqa3d": (
         ("sqa3d_ref_scannet_train_single",),
         ("sqa3d_ref_scannet_val_single_batched",),
+        ("sqa3d_ref_scannet_test_single_batched",),
         ("SQA_train.json",),
     ),
     "scanqa": (
         ("scanqa_ref_scannet_train_single",),
         ("scanqa_ref_scannet_val_single_batched",),
+        ("scanqa_ref_scannet_test_single_batched",),
         ("ScanQA_v1.0_train.json",),
     ),
     "all": (
@@ -42,6 +44,10 @@ DATASETS = {
             "sqa3d_ref_scannet_val_single_batched",
             "scanqa_ref_scannet_val_single_batched",
         ),
+        (
+            "sqa3d_ref_scannet_test_single_batched",
+            "scanqa_ref_scannet_test_single_batched",
+        ),
         ("SQA_train.json", "ScanQA_v1.0_train.json"),
     ),
 }
@@ -51,6 +57,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-size", choices=("3b", "7b"), default="3b")
     parser.add_argument("--dataset", choices=tuple(DATASETS), default="sqa3d")
+    parser.add_argument(
+        "--eval-split",
+        choices=("val", "test"),
+        default="val",
+        help="QA split evaluated after a full training run.",
+    )
     parser.add_argument("--loss-type", choices=LOSS_TYPES, default="focal")
     parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument("--max-iter", type=int, default=1)
@@ -151,7 +163,10 @@ def main():
         root / "data/scannet_image_qwen_features" / args.model_size
     )
     output_root = args.output_root or (root / "output/rft_lora")
-    train_datasets, test_datasets, annotation_files = DATASETS[args.dataset]
+    train_datasets, val_datasets, test_datasets, annotation_files = DATASETS[
+        args.dataset
+    ]
+    eval_datasets = val_datasets if args.eval_split == "val" else test_datasets
 
     require_path(backbone / "config.json", "local Qwen-VL backbone")
     require_path(checkpoint, "Qwen-3D checkpoint")
@@ -238,7 +253,7 @@ def main():
         "DATASETS.TRAIN",
         repr(train_datasets),
         "DATASETS.TEST",
-        repr(test_datasets),
+        repr(eval_datasets),
         "QA_GROUND_LOSS",
         "False",
         "USE_AUTO_NOUN_DETECTION",
@@ -280,6 +295,7 @@ def main():
         f"original_coef={args.original_loss_coef} "
         f"rft_coef={args.rft_loss_coef} "
         f"generation_weight={args.generation_weight} smoke={smoke} "
+        f"eval_split={args.eval_split} "
         f"scene_limit={args.smoke_scenes if smoke else 'all'} "
         f"find_unused_parameters={args.num_gpus > 1} "
         f"gradient_accumulation_steps={args.gradient_accumulation_steps} "
