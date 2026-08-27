@@ -46,6 +46,29 @@ Smoke mode is the default. It uses one 3D scene, performs the normal forward,
 backward, and optimizer step, and suppresses evaluation and checkpoint writing.
 Jobs longer than 10 iterations require the explicit `--full-run` flag.
 
+Use `--dataset all` to concatenate the supported SQA3D and ScanQA training
+sets and evaluate both validation sets. Full runs remove
+`QWEN3D_SMOKE_SCENES` from the child environment even if it was exported by a
+previous smoke job. Multi-GPU runs automatically enable Detectron2 unused
+parameter discovery because Qwen-3D's conditional 3D heads do not all receive
+gradients on every rank.
+
+Full-run VQA evaluation uses pycocoevalcap METEOR and therefore requires a
+Java runtime on the GPU node (Ubuntu: `apt-get install default-jre-headless`).
+
+For example, the combined eight-GPU post-training entry point is:
+
+```bash
+python repro/train_rft_lora.py \
+  --model-size 3b \
+  --dataset all \
+  --loss-type focal \
+  --gamma 1 \
+  --num-gpus 8 \
+  --max-iter 13126 \
+  --full-run
+```
+
 To exercise the requested focal exponents, run the command with `--gamma 0.5`,
 `--gamma 1`, and `--gamma 2`. Outputs are isolated under
 `output/rft_lora/<unique-run-name>`.

@@ -8,6 +8,7 @@ explicitly before requesting a longer training job.
 
 import argparse
 import os
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -23,14 +24,25 @@ LOSS_TYPES = (
 
 DATASETS = {
     "sqa3d": (
-        "sqa3d_ref_scannet_train_single",
-        "sqa3d_ref_scannet_val_single_batched",
-        "SQA_train.json",
+        ("sqa3d_ref_scannet_train_single",),
+        ("sqa3d_ref_scannet_val_single_batched",),
+        ("SQA_train.json",),
     ),
     "scanqa": (
-        "scanqa_ref_scannet_train_single",
-        "scanqa_ref_scannet_val_single_batched",
-        "ScanQA_v1.0_train.json",
+        ("scanqa_ref_scannet_train_single",),
+        ("scanqa_ref_scannet_val_single_batched",),
+        ("ScanQA_v1.0_train.json",),
+    ),
+    "all": (
+        (
+            "sqa3d_ref_scannet_train_single",
+            "scanqa_ref_scannet_train_single",
+        ),
+        (
+            "sqa3d_ref_scannet_val_single_batched",
+            "scanqa_ref_scannet_val_single_batched",
+        ),
+        ("SQA_train.json", "ScanQA_v1.0_train.json"),
     ),
 }
 
@@ -85,6 +97,8 @@ def main():
         raise ValueError("--gamma must be positive")
     if args.num_gpus < 1:
         raise ValueError("--num-gpus must be at least 1")
+    if args.smoke_scenes < 1:
+        raise ValueError("--smoke-scenes must be at least 1")
     if min(
         args.original_loss_coef,
         args.rft_loss_coef,
@@ -112,14 +126,18 @@ def main():
         root / "data/scannet_image_qwen_features" / args.model_size
     )
     output_root = args.output_root or (root / "output/rft_lora")
-    train_dataset, test_dataset, annotation_file = DATASETS[args.dataset]
+    train_datasets, test_datasets, annotation_files = DATASETS[args.dataset]
 
     require_path(backbone / "config.json", "local Qwen-VL backbone")
     require_path(checkpoint, "Qwen-3D checkpoint")
     # FEATURE_DIR is only consumed when CACHE_QWEN_FEATURES is enabled.  The
     # prepared yicloud runs encode RGB frames directly, so an absent optional
     # cache directory must not block post-training.
-    require_path(root / "data/refer_it_3d" / annotation_file, "3D QA training data")
+    for annotation_file in annotation_files:
+        require_path(
+            root / "data/refer_it_3d" / annotation_file,
+            "3D QA training data",
+        )
     require_path(
         root / "data/mask3d_processed/scannet200/train_validation_database.yaml",
         "ScanNet 3D database",
@@ -133,6 +151,7 @@ def main():
     )
 
     environment = os.environ.copy()
+    smoke = not args.full_run
     environment.update(
         {
             "QWEN3D_ROOT": str(root),
@@ -152,11 +171,22 @@ def main():
             "CHECKPOINT_PERIOD": str(args.max_iter + 1),
             "EVAL_PERIOD": str(args.max_iter + 1),
             "WANDB_MODE": "disabled",
-            "QWEN3D_SMOKE_SCENES": str(args.smoke_scenes),
         }
     )
+    if smoke:
+        environment["QWEN3D_SMOKE_SCENES"] = str(args.smoke_scenes)
+    else:
+        # Do not inherit a scene cap exported by a prior smoke run.
+        environment.pop("QWEN3D_SMOKE_SCENES", None)
 
-    smoke = not args.full_run
+    if args.full_run and not args.dry_run and shutil.which(
+        "java", path=environment.get("PATH")
+    ) is None:
+        raise RuntimeError(
+            "Full-run evaluation requires Java for pycocoevalcap METEOR. "
+            "Install default-jre-headless on the training node first."
+        )
+
     command = [
         "bash",
         "scripts/main_qwen.sh",
@@ -181,9 +211,9 @@ def main():
         "FEATURE_DIR",
         str(feature_dir),
         "DATASETS.TRAIN",
-        f"('{train_dataset}',)",
+        repr(train_datasets),
         "DATASETS.TEST",
-        f"('{test_dataset}',)",
+        repr(test_datasets),
         "QA_GROUND_LOSS",
         "False",
         "USE_AUTO_NOUN_DETECTION",
@@ -192,6 +222,8 @@ def main():
         "False",
         "SAMPLING_STRATEGY_REF",
         str(args.use_relevant_frame_map),
+        "FIND_UNUSED_PARAMETERS",
+        str(args.num_gpus > 1),
         "SOLVER.MAX_ITER",
         str(args.max_iter),
         "SOLVER.BASE_LR",
@@ -220,7 +252,9 @@ def main():
         f"loss_type={args.loss_type} gamma={args.gamma} "
         f"original_coef={args.original_loss_coef} "
         f"rft_coef={args.rft_loss_coef} "
-        f"generation_weight={args.generation_weight} smoke={smoke}"
+        f"generation_weight={args.generation_weight} smoke={smoke} "
+        f"scene_limit={args.smoke_scenes if smoke else 'all'} "
+        f"find_unused_parameters={args.num_gpus > 1}"
     )
     print("command=" + " ".join(command))
     if args.dry_run:
