@@ -68,6 +68,15 @@ Matched 8-GPU measurements found no steady-state gain from increasing two to
 four workers per rank, while four doubled startup/prefetch pressure on shared
 GPFS, so two is the hardware-tested default rather than a CPU-count heuristic.
 
+The per-rank 3D QA micro-batch remains one because the current point-cloud and
+generation paths are not batch-safe. The launcher instead defaults to two
+gradient-accumulation micro-steps per optimizer step. Losses are divided by
+the accumulation count, DDP synchronization is skipped for all but the final
+micro-step, and `SOLVER.MAX_ITER` continues to count optimizer updates. Thus
+8 GPUs have an effective batch of 16 by default. Override this with
+`--gradient-accumulation-steps`; one epoch of the current 105,008-sample
+SQA3D+ScanQA loader is about 6,563 optimizer steps at accumulation two.
+
 For example, the combined eight-GPU post-training entry point is:
 
 ```bash
@@ -77,7 +86,8 @@ python repro/train_rft_lora.py \
   --loss-type focal \
   --gamma 1 \
   --num-gpus 8 \
-  --max-iter 13126 \
+  --gradient-accumulation-steps 2 \
+  --max-iter 6563 \
   --full-run
 ```
 

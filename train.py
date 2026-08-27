@@ -804,10 +804,12 @@ class Trainer(DefaultTrainer):
             results_structured.update(results_val)
         return results_structured
 
-    def run_fwd_bwd(self):
+    def run_fwd_bwd(self, *, zero_grad=True, loss_divisor=1):
         """
         Implement the AMP training logic.
         """
+        if loss_divisor < 1:
+            raise ValueError("loss_divisor must be at least one")
         self._trainer.iter = self.iter
 
         assert (
@@ -856,11 +858,13 @@ class Trainer(DefaultTrainer):
                 optimizer = self.optimzer_2d
         else:
             optimizer = self._trainer.optimizer
-        optimizer.zero_grad()
+        if zero_grad:
+            optimizer.zero_grad(set_to_none=True)
+        backward_losses = losses / loss_divisor
         if self.cfg.SOLVER.AMP.DTYPE == "float16":
-            self._trainer.grad_scaler.scale(losses).backward()
+            self._trainer.grad_scaler.scale(backward_losses).backward()
         else:
-            losses.backward()
+            backward_losses.backward()
         self._trainer.after_backward()
 
         self._write_metrics(loss_dict, data_time)
@@ -883,18 +887,33 @@ class Trainer(DefaultTrainer):
             return
 
         if self.cfg.GRAD_ACCUMULATION_STEPS > 1:
-            if (self.iter + 1) % self.cfg.GRAD_ACCUMULATION_STEPS == 0:
-                optimizer = self.run_fwd_bwd()
-                self._trainer.grad_scaler.step(optimizer)
-                optimizer.zero_grad(set_to_none=True)
+            accumulation_steps = self.cfg.GRAD_ACCUMULATION_STEPS
+            optimizer = None
+            for micro_step in range(accumulation_steps):
+                sync_gradients = micro_step == accumulation_steps - 1
+                sync_context = (
+                    contextlib.nullcontext()
+                    if sync_gradients or comm.get_world_size() == 1
+                    else self.model.no_sync()
+                )
+                with sync_context:
+                    current_optimizer = self.run_fwd_bwd(
+                        zero_grad=micro_step == 0,
+                        loss_divisor=accumulation_steps,
+                    )
+                if optimizer is not None and current_optimizer is not optimizer:
+                    raise RuntimeError(
+                        "Gradient accumulation cannot mix different optimizers "
+                        "within one update"
+                    )
+                optimizer = current_optimizer
 
+            if self.cfg.SOLVER.AMP.DTYPE == "float16":
+                self._trainer.grad_scaler.step(optimizer)
                 self._trainer.grad_scaler.update()
             else:
-                if comm.get_world_size() == 1:
-                    self.run_fwd_bwd()
-                else:
-                    with self.model.no_sync():
-                        self.run_fwd_bwd()
+                optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
         else:
             rank = comm.get_rank()
             custom_viz_track = VizTracer(output_file=f"profile_{rank}.json") if self.cfg.USE_VIZTRACER and (self.iter > 10) else contextlib.nullcontext()

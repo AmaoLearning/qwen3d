@@ -56,6 +56,15 @@ def parse_args():
     parser.add_argument("--max-iter", type=int, default=1)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--warmup-iters", type=int, default=0)
+    parser.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=2,
+        help=(
+            "Micro-batches accumulated per optimizer step. With 8 GPUs and "
+            "the fixed per-rank micro-batch of one, 2 gives effective batch 16."
+        ),
+    )
     parser.add_argument("--original-loss-coef", type=float, default=1.0)
     parser.add_argument("--rft-loss-coef", type=float, default=1.0)
     parser.add_argument("--generation-weight", type=float, default=5.0)
@@ -113,6 +122,8 @@ def main():
         raise ValueError("dataloader worker counts must be non-negative")
     if args.smoke_scenes < 1:
         raise ValueError("--smoke-scenes must be at least 1")
+    if args.gradient_accumulation_steps < 1:
+        raise ValueError("--gradient-accumulation-steps must be at least 1")
     if min(
         args.original_loss_coef,
         args.rft_loss_coef,
@@ -244,6 +255,8 @@ def main():
         str(args.learning_rate),
         "SOLVER.WARMUP_ITERS",
         str(args.warmup_iters),
+        "GRADIENT_ACCUMULATION_STEPS",
+        str(args.gradient_accumulation_steps),
         "MODEL.MASK_FORMER.GENERATION_WEIGHT",
         str(args.generation_weight),
         "RFT_LOSS.ENABLED",
@@ -269,6 +282,8 @@ def main():
         f"generation_weight={args.generation_weight} smoke={smoke} "
         f"scene_limit={args.smoke_scenes if smoke else 'all'} "
         f"find_unused_parameters={args.num_gpus > 1} "
+        f"gradient_accumulation_steps={args.gradient_accumulation_steps} "
+        f"effective_batch={args.num_gpus * args.gradient_accumulation_steps} "
         f"workers_per_rank={args.num_workers} "
         f"val_workers_per_rank={args.num_val_workers}"
     )
