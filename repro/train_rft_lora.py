@@ -255,7 +255,7 @@ def main():
         str(args.learning_rate),
         "SOLVER.WARMUP_ITERS",
         str(args.warmup_iters),
-        "GRADIENT_ACCUMULATION_STEPS",
+        "GRAD_ACCUMULATION_STEPS",
         str(args.gradient_accumulation_steps),
         "MODEL.MASK_FORMER.GENERATION_WEIGHT",
         str(args.generation_weight),
